@@ -4,6 +4,7 @@
 //
 
 import libxlsxwriter
+import Foundation
 
 /// Struct to represent an Excel worksheet.
 public struct Worksheet {
@@ -112,6 +113,49 @@ public struct Worksheet {
 
     return self
   }
+    
+    ///
+    ///  Writes a rich string to a given cell by assembling the rich string fragments. The final format parameter should contain
+    ///  attributes that apply to the cell, but not the string (border type/color, background color, etc.) Including such attributes
+    ///  in the formats applied to each string fragment will fail to apply them to the cell.
+    ///
+    ///  WARNING: It is an error for two consecutive fragments to share the same format object, or for a fragment to have an empty string.
+    ///
+    @discardableResult public func writeRichString(fragments: [RichStringFragment], _ cell: Cell, format: Format? = nil) throws -> Worksheet
+    {
+        guard !fragments.isEmpty else {
+            return self
+        }
+
+        let r = cell.row
+        let c = cell.col
+        let mainFormat = format?.lxw_format
+        
+        var rawTuples: [lxw_rich_string_tuple] = []
+        for fragment: RichStringFragment in fragments
+        {
+            let f = fragment.format?.lxw_format
+            let s = UnsafeMutablePointer<Int8>(mutating: (fragment.string as NSString).utf8String)
+            
+            let t = lxw_rich_string_tuple(format: f, string: s)
+            rawTuples.append(t)
+        }
+        
+        rawTuples.withUnsafeMutableBufferPointer { p in
+            
+            guard let arrBaseAddress = p.baseAddress else { return }
+
+            var pointersToEachArrayElement: [UnsafeMutablePointer<lxw_rich_string_tuple>?] = Array(arrBaseAddress ..< arrBaseAddress.advanced(by: p.count))
+            pointersToEachArrayElement.append(nil)
+            
+            _ = pointersToEachArrayElement.withUnsafeMutableBufferPointer { q in
+                worksheet_write_rich_string(lxw_worksheet, r, c, q.baseAddress, mainFormat)
+            }
+        }
+        
+        return self
+    }
+    
   /// Set a worksheet tab as selected.
   @discardableResult public func select() -> Worksheet {
     worksheet_select(lxw_worksheet)
@@ -254,4 +298,23 @@ private func makeCString(from str: String) -> UnsafePointer<CChar> {
   let result = UnsafeMutablePointer<CChar>.allocate(capacity: count)
   str.withCString { result.initialize(from: $0, count: count) }
   return UnsafePointer(result)
+}
+
+
+
+///
+///  Represents one fragment of a rich string: a substring and, optionally, a format to apply to that substring.
+///
+///  Warning: Libxlsxwriter will throw an error if two consecutive fragments of a rich string have the same format object.
+///
+public struct RichStringFragment
+{
+    var format: Format?
+    var string: String
+    
+    public init(_ string: String, format: Format? = nil)
+    {
+        self.string = string
+        self.format = format
+    }
 }
